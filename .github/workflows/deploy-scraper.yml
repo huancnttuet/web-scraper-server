@@ -43,7 +43,6 @@ jobs:
         run: |
           aws lambda update-function-code \
             --function-name ${{ env.FUNCTION_NAME }} \
-             --handler scraper_handler.lambda_handler \
             --zip-file fileb://function.zip \
             --region ${{ env.AWS_REGION }}
 
