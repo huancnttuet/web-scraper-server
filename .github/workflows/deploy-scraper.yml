@@ -52,10 +52,11 @@ jobs:
             --function-name ${{ env.FUNCTION_NAME }} \
             --region ${{ env.AWS_REGION }}
 
-      - name: Update environment variables (optional)
+      - name: Update function configuration
         run: |
           aws lambda update-function-configuration \
             --function-name ${{ env.FUNCTION_NAME }} \
+            --handler scraper_handler.lambda_handler \
             --timeout 60 \
             --memory-size 512 \
             --region ${{ env.AWS_REGION }}
