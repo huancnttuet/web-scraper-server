@@ -34,13 +34,12 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Create deployment package
-        working-directory: 02-lambda/lab07-web-scraper
+        
         run: |
           cd lambda
           zip -r ../function.zip *.py
 
       - name: Deploy Lambda function
-        working-directory: 02-lambda/lab07-web-scraper
         run: |
           aws lambda update-function-code \
             --function-name ${{ env.FUNCTION_NAME }} \
