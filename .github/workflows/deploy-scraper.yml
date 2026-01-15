@@ -5,13 +5,13 @@ on:
     branches:
       - master
     paths:
-      - "02-lambda/lab07-web-scraper/lambda/**"
+      - "lambda/**"
       - ".github/workflows/deploy-scraper.yml"
   workflow_dispatch:
 
 env:
   AWS_REGION: ap-southeast-1
-  FUNCTION_NAME: WebScraper-dev
+  FUNCTION_NAME: WebScraperServer
 
 jobs:
   deploy:
