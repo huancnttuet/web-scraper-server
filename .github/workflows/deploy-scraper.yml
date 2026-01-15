@@ -1,0 +1,78 @@
+name: Deploy Web Scraper Lambda
+
+on:
+  push:
+    branches:
+      - master
+    paths:
+      - "02-lambda/lab07-web-scraper/lambda/**"
+      - ".github/workflows/deploy-scraper.yml"
+  workflow_dispatch:
+
+env:
+  AWS_REGION: ap-southeast-1
+  FUNCTION_NAME: WebScraper-dev
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create deployment package
+        working-directory: 02-lambda/lab07-web-scraper
+        run: |
+          cd lambda
+          zip -r ../function.zip *.py
+
+      - name: Deploy Lambda function
+        working-directory: 02-lambda/lab07-web-scraper
+        run: |
+          aws lambda update-function-code \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --zip-file fileb://function.zip \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Wait for update to complete
+        run: |
+          aws lambda wait function-updated-v2 \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Update environment variables (optional)
+        run: |
+          aws lambda update-function-configuration \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --timeout 60 \
+            --memory-size 512 \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Test function
+        run: |
+          aws lambda invoke \
+            --function-name ${{ env.FUNCTION_NAME }} \
+            --payload '{"url": "https://example.com"}' \
+            --region ${{ env.AWS_REGION }} \
+            response.json
+
+          cat response.json
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Lambda function deployed successfully!"
+          echo "Function: ${{ env.FUNCTION_NAME }}"
+          echo "Region: ${{ env.AWS_REGION }}"

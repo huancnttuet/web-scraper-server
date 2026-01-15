@@ -1,0 +1,225 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'LAB-07: Web Scraper Lambda with S3, DynamoDB, and EventBridge'
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: 'web-scraper'
+    Description: Name prefix for resources
+  
+  TargetUrl:
+    Type: String
+    Default: 'https://example.com'
+    Description: Default URL to scrape
+  
+  ScheduleExpression:
+    Type: String
+    Default: 'rate(1 day)'
+    Description: 'How often to run the scraper (e.g., rate(1 hour), rate(1 day), cron(0 8 * * ? *))'
+
+Resources:
+  # S3 Bucket for storing scraped data
+  ScrapedDataBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub '${ProjectName}-data-${AWS::AccountId}'
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldData
+            Status: Enabled
+            ExpirationInDays: 30
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # DynamoDB Table for metadata
+  ScrapedMetadataTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub '${ProjectName}-metadata'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: url
+          AttributeType: S
+        - AttributeName: scraped_at
+          AttributeType: S
+      KeySchema:
+        - AttributeName: url
+          KeyType: HASH
+        - AttributeName: scraped_at
+          KeyType: RANGE
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Lambda Execution Role
+  LambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub '${ProjectName}-lambda-role'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:ListBucket
+                Resource:
+                  - !GetAtt ScrapedDataBucket.Arn
+                  - !Sub '${ScrapedDataBucket.Arn}/*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource: !GetAtt ScrapedMetadataTable.Arn
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # Lambda Layer for dependencies (requests, beautifulsoup4)
+  ScraperDependenciesLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: !Sub '${ProjectName}-dependencies'
+      Description: 'Dependencies for web scraping: requests, beautifulsoup4, lxml'
+      CompatibleRuntimes:
+        - python3.12
+      Content:
+        S3Bucket: !Ref ScrapedDataBucket
+        S3Key: layers/dependencies.zip
+
+  # Main Scraper Lambda Function
+  ScraperFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: !Sub '${ProjectName}-scraper'
+      Runtime: python3.12
+      Handler: scraper_handler.lambda_handler
+      Code:
+        ZipFile: |
+          # Placeholder - deploy actual code separately
+          def lambda_handler(event, context):
+              return {'statusCode': 200, 'body': 'Placeholder'}
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Timeout: 60
+      MemorySize: 256
+      Layers:
+        - !Ref ScraperDependenciesLayer
+      Environment:
+        Variables:
+          BUCKET_NAME: !Ref ScrapedDataBucket
+          TABLE_NAME: !Ref ScrapedMetadataTable
+          TARGET_URL: !Ref TargetUrl
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  # EventBridge Rule for scheduled scraping
+  ScheduledScrapingRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub '${ProjectName}-schedule'
+      Description: 'Scheduled trigger for web scraper'
+      ScheduleExpression: !Ref ScheduleExpression
+      State: ENABLED
+      Targets:
+        - Id: ScraperTarget
+          Arn: !GetAtt ScraperFunction.Arn
+
+  # Permission for EventBridge to invoke Lambda
+  ScheduledScrapingPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScraperFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt ScheduledScrapingRule.Arn
+
+  # API Gateway for manual trigger
+  ScraperApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub '${ProjectName}-api'
+      Description: 'API for triggering web scraper'
+
+  ScraperResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ScraperApi
+      ParentId: !GetAtt ScraperApi.RootResourceId
+      PathPart: scrape
+
+  ScraperMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ScraperApi
+      ResourceId: !Ref ScraperResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS_PROXY
+        IntegrationHttpMethod: POST
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ScraperFunction.Arn}/invocations'
+
+  ApiGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ScraperFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub 'arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ScraperApi}/*'
+
+  ApiDeployment:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: ScraperMethod
+    Properties:
+      RestApiId: !Ref ScraperApi
+      StageName: prod
+
+Outputs:
+  ScraperFunctionArn:
+    Description: 'ARN of Scraper Lambda function'
+    Value: !GetAtt ScraperFunction.Arn
+
+  BucketName:
+    Description: 'S3 Bucket for scraped data'
+    Value: !Ref ScrapedDataBucket
+
+  TableName:
+    Description: 'DynamoDB table for metadata'
+    Value: !Ref ScrapedMetadataTable
+
+  ApiEndpoint:
+    Description: 'API Gateway endpoint for manual trigger'
+    Value: !Sub 'https://${ScraperApi}.execute-api.${AWS::Region}.amazonaws.com/prod/scrape'
+
+  ScheduleRuleArn:
+    Description: 'EventBridge Rule ARN'
+    Value: !GetAtt ScheduledScrapingRule.Arn
