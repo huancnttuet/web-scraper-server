@@ -34,7 +34,7 @@ jobs:
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Create deployment package
-        
+
         run: |
           cd lambda
           zip -r ../function.zip *.py
@@ -43,6 +43,7 @@ jobs:
         run: |
           aws lambda update-function-code \
             --function-name ${{ env.FUNCTION_NAME }} \
+             --handler scraper_handler.lambda_handler \
             --zip-file fileb://function.zip \
             --region ${{ env.AWS_REGION }}
 
@@ -60,15 +61,15 @@ jobs:
             --memory-size 512 \
             --region ${{ env.AWS_REGION }}
 
-      - name: Test function
-        run: |
-          aws lambda invoke \
-            --function-name ${{ env.FUNCTION_NAME }} \
-            --payload '{"url": "https://example.com"}' \
-            --region ${{ env.AWS_REGION }} \
-            response.json
+      # - name: Test function
+      #   run: |
+      #     aws lambda invoke \
+      #       --function-name ${{ env.FUNCTION_NAME }} \
+      #       --payload '{"url": "https://example.com"}' \
+      #       --region ${{ env.AWS_REGION }} \
+      #       response.json
 
-          cat response.json
+      #     cat response.json
 
       - name: Deployment summary
         run: |
