@@ -12,6 +12,7 @@ on:
 env:
   AWS_REGION: ap-southeast-1
   FUNCTION_NAME: WebScraperServer
+  LAYER_NAME: web-scraper-dependencies
 
 jobs:
   deploy:
@@ -32,6 +33,37 @@ jobs:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create Lambda Layer (if not exists)
+        run: |
+          # Check if layer exists
+          LAYER_EXISTS=$(aws lambda list-layer-versions --layer-name ${{ env.LAYER_NAME }} --region ${{ env.AWS_REGION }} --query 'LayerVersions[0].LayerVersionArn' --output text 2>/dev/null || echo "")
+
+          if [ -z "$LAYER_EXISTS" ] || [ "$LAYER_EXISTS" == "None" ]; then
+            echo "Creating new Lambda Layer..."
+            
+            # Create layer directory
+            mkdir -p layer/python
+            cd layer
+            
+            # Install dependencies
+            pip install requests beautifulsoup4 lxml -t python --platform manylinux2014_x86_64 --only-binary=:all:
+            
+            # Create zip
+            zip -r dependencies.zip python
+            
+            # Publish layer
+            aws lambda publish-layer-version \
+              --layer-name ${{ env.LAYER_NAME }} \
+              --description "requests, beautifulsoup4, lxml for web scraping" \
+              --zip-file fileb://dependencies.zip \
+              --compatible-runtimes python3.12 \
+              --region ${{ env.AWS_REGION }}
+            
+            cd ..
+          else
+            echo "Lambda Layer already exists: $LAYER_EXISTS"
+          fi
 
       - name: Create deployment package
 
@@ -54,11 +86,21 @@ jobs:
 
       - name: Update function configuration
         run: |
+          # Get latest layer version ARN
+          LAYER_ARN=$(aws lambda list-layer-versions \
+            --layer-name ${{ env.LAYER_NAME }} \
+            --region ${{ env.AWS_REGION }} \
+            --query 'LayerVersions[0].LayerVersionArn' \
+            --output text)
+
+          echo "Using Layer: $LAYER_ARN"
+
           aws lambda update-function-configuration \
             --function-name ${{ env.FUNCTION_NAME }} \
             --handler scraper_handler.lambda_handler \
             --timeout 60 \
             --memory-size 512 \
+            --layers "$LAYER_ARN" \
             --region ${{ env.AWS_REGION }}
 
       # - name: Test function
