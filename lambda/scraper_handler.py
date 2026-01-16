@@ -1,4 +1,5 @@
 import json
+import uuid
 import boto3
 import os
 from datetime import datetime
@@ -198,6 +199,7 @@ def save_to_dynamodb(data, url, s3_key):
     table = dynamodb.Table(TABLE_NAME)
     
     item = {
+        'id': str(uuid.uuid4()),
         'url': url,
         'scraped_at': data['scraped_at'],
         'title': data['title'],
